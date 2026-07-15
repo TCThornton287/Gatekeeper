@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Validating Tap...</title>
+    <script>
+        window.onload = function() {
+            // 1. Get Tag details from the URL query string
+            const urlParams = new URLSearchParams(window.location.search);
+            const tagId = urlParams.get('uid') || 'Unknown';
+
+            // 2. Generate/Retrieve a persistent anonymous token for this phone's browser
+            let deviceHash = localStorage.getItem('nhs_student_token');
+            if (!deviceHash) {
+                deviceHash = 'dev_' + Math.random().toString(36).substring(2, 15);
+                localStorage.setItem('nhs_student_token', deviceHash);
+            }
+
+            // --- CONFIGURATION ---
+            // Replace these with your actual NHS Trust SharePoint site details
+            const sharePointSiteUrl = "https://stockportnhsuk-my.sharepoint.com/:l:/g/personal/natasha_thornton_stockport_nhs_uk/JADoDMJB8igcSIkeY1PARu44AQlestLyCQIdlgyg0di8BH4?e=FcV10Z";
+            const listName = "NFCTapLog";
+            const microsoftFormUrl = "https://forms.cloud.microsoft/e/hKj06qhre2";
+            // ---------------------
+
+            // 3. Query SharePoint directly to see if this DeviceHash tapped this TagID in the last 24 hours
+            const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+            const filterUrl = `${sharePointSiteUrl}/_api/web/lists/getbytitle('${listName}')/items?$filter=(DeviceHash eq '${deviceHash}') and (TagID eq '${tagId}') and (TapTime gt '${yesterday}')`;
+
+            fetch(filterUrl, {
+                method: "GET",
+                headers: { "Accept": "application/json; odata=verbose" }
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.d.results.length > 0) {
+                    // IF YES: Student already tapped today
+                    document.body.innerHTML = `
+                        <div style="text-align:center; font-family:sans-serif; margin-top:50px;">
+                            <h2 style="color:#d9534f;">Access Denied</h2>
+                            <p>You have already scanned this tag today. Please try again tomorrow.</p>
+                        </div>`;
+                } else {
+                    // IF NO: Log the tap to SharePoint first, then redirect
+                    logTapAndRedirect(sharePointSiteUrl, listName, tagId, deviceHash, microsoftFormUrl);
+                }
+            })
+            .catch(err => {
+                // Fallback direct redirect if network/security strictly blocks the check read
+                window.location.href = microsoftFormUrl;
+            });
+        };
+
+        function logTapAndRedirect(siteUrl, list, tag, hash, formUrl) {
+            const postUrl = `${siteUrl}/_api/web/lists/getbytitle('${list}')/items`;
+            const payload = {
+                "__metadata": { "type": "SP.Data.NFCTapLogListItem" },
+                "TagID": tag,
+                "DeviceHash": hash,
+                "TapTime": new Date().toISOString()
+            };
+
+            fetch(postUrl, {
+                method: "POST",
+                body: JSON.stringify(payload),
+                headers: {
+                    "Accept": "application/json; odata=verbose",
+                    "Content-Type": "application/json; odata=verbose"
+                }
+            })
+            .then(() => {
+                window.location.href = formUrl; // Smooth redirect to the form
+            })
+            .catch(() => {
+                window.location.href = formUrl; // Redirect anyway if write fails so student isn't stuck
+            });
+        }
+    </script>
+</head>
+<body>
+    <p style="text-align:center; font-family:sans-serif; margin-top:50px;">Verifying your access, please wait...</p>
+</body>
+</html>
